@@ -20,6 +20,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from mem0.exceptions import ValidationError as Mem0ValidationError
+from mem0.utils.embedding_dimensions import infer_embedding_dims
 from models import RequestLog, User
 from pydantic import BaseModel, Field
 from rate_limit import limiter
@@ -59,7 +60,7 @@ SKIPPED_REQUEST_LOG_PATHS = {"/api/health", "/docs", "/redoc", "/openapi.json"}
 SKIPPED_REQUEST_LOG_PREFIXES = ("/requests",)
 
 BUNDLED_LLM_PROVIDERS = ("openai", "anthropic", "gemini")
-BUNDLED_EMBEDDER_PROVIDERS = ("openai", "gemini")
+BUNDLED_EMBEDDER_PROVIDERS = ("openai", "gemini", "ollama")
 
 
 def _warn_if_unconfigured() -> None:
@@ -111,10 +112,30 @@ POSTGRES_USER = os.environ.get("POSTGRES_USER", "postgres")
 POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "postgres")
 POSTGRES_COLLECTION_NAME = os.environ.get("POSTGRES_COLLECTION_NAME", "memories")
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+# OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 HISTORY_DB_PATH = os.environ.get("HISTORY_DB_PATH", "/app/history/history.db")
 DEFAULT_LLM_MODEL = os.environ.get("MEM0_DEFAULT_LLM_MODEL", "gpt-4.1-nano-2025-04-14")
-DEFAULT_EMBEDDER_MODEL = os.environ.get("MEM0_DEFAULT_EMBEDDER_MODEL", "text-embedding-3-small")
+DEFAULT_EMBEDDER_MODEL = os.environ.get("MEM0_DEFAULT_EMBEDDER_MODEL", "nomic-embed-text")
+DEFAULT_EMBEDDER_DIMS = infer_embedding_dims(
+    "ollama",
+    DEFAULT_EMBEDDER_MODEL,
+    explicit=(
+        int(os.environ["MEM0_DEFAULT_EMBEDDER_DIMS"])
+        if os.environ.get("MEM0_DEFAULT_EMBEDDER_DIMS")
+        else None
+    ),
+)
+
+
+def _default_ollama_base_url() -> str:
+    """Choose a Docker-safe default Ollama URL when the server runs in a container."""
+    if os.path.exists("/.dockerenv"):
+        return "http://host.docker.internal:11434"
+    return "http://localhost:11434"
+
+
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", _default_ollama_base_url())
 
 DEFAULT_CONFIG = {
     "version": "v1.1",
@@ -127,13 +148,20 @@ DEFAULT_CONFIG = {
             "user": POSTGRES_USER,
             "password": POSTGRES_PASSWORD,
             "collection_name": POSTGRES_COLLECTION_NAME,
+            "embedding_model_dims": DEFAULT_EMBEDDER_DIMS,
         },
     },
     "llm": {
-        "provider": "openai",
-        "config": {"api_key": OPENAI_API_KEY, "temperature": 0.2, "model": DEFAULT_LLM_MODEL},
+        "provider": "anthropic",
+        "config": {"api_key": ANTHROPIC_API_KEY, "temperature": 0.2, "model": DEFAULT_LLM_MODEL},
     },
-    "embedder": {"provider": "openai", "config": {"api_key": OPENAI_API_KEY, "model": DEFAULT_EMBEDDER_MODEL}},
+    "embedder": {
+        "provider": "ollama",
+        "config": {
+            "model": DEFAULT_EMBEDDER_MODEL,
+            "ollama_base_url": OLLAMA_BASE_URL,
+        },
+    },
     "history_db_path": HISTORY_DB_PATH,
 }
 

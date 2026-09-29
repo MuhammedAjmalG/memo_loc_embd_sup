@@ -55,6 +55,85 @@ def mock_memory(_mock_memory):
     return _mock_memory
 
 
+class TestServerOllamaDefaults:
+    """Verify the server's default Ollama embedder config is Docker-safe."""
+
+    def test_embedder_uses_explicit_ollama_base_url_from_env(self, _mock_memory):
+        import server.main as server_main
+
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "fake-key",
+                "ADMIN_API_KEY": "",
+                "OLLAMA_BASE_URL": "http://host.docker.internal:11434",
+            },
+            clear=False,
+        ):
+            importlib.reload(server_main)
+
+        assert server_main.DEFAULT_CONFIG["embedder"]["provider"] == "ollama"
+        assert server_main.DEFAULT_CONFIG["embedder"]["config"]["model"] == "nomic-embed-text"
+        assert (
+            server_main.DEFAULT_CONFIG["embedder"]["config"]["ollama_base_url"]
+            == "http://host.docker.internal:11434"
+        )
+        assert server_main.DEFAULT_CONFIG["vector_store"]["config"]["embedding_model_dims"] == 768
+
+    def test_embedder_switch_updates_pgvector_dims_when_not_explicitly_set(self, _mock_memory):
+        import server.main as server_main
+
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "fake-key",
+                "ADMIN_API_KEY": "",
+                "OLLAMA_BASE_URL": "http://host.docker.internal:11434",
+            },
+            clear=False,
+        ):
+            importlib.reload(server_main)
+
+        assert server_main.get_current_config()["vector_store"]["config"]["embedding_model_dims"] == 768
+
+        server_main.update_config(
+            {
+                "embedder": {
+                    "provider": "openai",
+                    "config": {"model": "text-embedding-3-small", "api_key": "env:OPENAI_API_KEY"},
+                }
+            }
+        )
+
+        assert server_main.get_current_config()["vector_store"]["config"]["embedding_model_dims"] == 1536
+
+    def test_explicit_vector_dims_are_preserved_on_embedder_switch(self, _mock_memory):
+        import server.main as server_main
+
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "fake-key",
+                "ADMIN_API_KEY": "",
+                "OLLAMA_BASE_URL": "http://host.docker.internal:11434",
+            },
+            clear=False,
+        ):
+            importlib.reload(server_main)
+
+        server_main.update_config(
+            {
+                "embedder": {
+                    "provider": "openai",
+                    "config": {"model": "text-embedding-3-small", "api_key": "env:OPENAI_API_KEY"},
+                },
+                "vector_store": {"config": {"embedding_model_dims": 2048}},
+            }
+        )
+
+        assert server_main.get_current_config()["vector_store"]["config"]["embedding_model_dims"] == 2048
+
+
 # ===========================================================================
 # SearchRequest: top_k parameter
 # ===========================================================================
